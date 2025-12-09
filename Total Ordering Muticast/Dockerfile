@@ -9,11 +9,11 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copia o código da aplicação
-COPY ordenacaototal.py .
+COPY app.py .
 
 # Expõe a porta que a aplicação usa
 EXPOSE 8000
 
 # Comando para iniciar a aplicação.
 # A variável de ambiente PROCESS_ID será fornecida em tempo de execução pelo Docker Compose.
-CMD ["uvicorn", "ordenacaototal:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]
