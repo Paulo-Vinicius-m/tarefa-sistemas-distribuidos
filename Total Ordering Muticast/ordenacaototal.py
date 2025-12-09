@@ -42,7 +42,6 @@ def broadcast_message(message: Message):
         if process != process_id:
             try:
                 # O endpoint para receber mensagens de outros processos
-                url = f"http://app-{process}.app-service:8000/recieve_message"
                 url = f"http://app-{process}:8000/recieve_message"
                 requests.post(url, json=message.model_dump(), timeout=0.5)
             except requests.RequestException as e:
@@ -59,7 +58,6 @@ def broadcast_ack(original_message: Message):
     for process in all_processes:
         if process != process_id:
             try:
-                url = f"http://app-{process}.app-service:8000/recieve_ack"
                 url = f"http://app-{process}:8000/recieve_ack"
                 requests.post(url, json=ack_message.model_dump(), timeout=0.5)
             except requests.RequestException as e:
