@@ -25,6 +25,14 @@ echo
 echo "Enviando 'Segunda mensagem' para o processo 3 (via localhost:${LOCAL_PORT_3})..."
 curl -X POST "http://localhost:${LOCAL_PORT_3}/recieve_external_message?message=Segunda%20mensagem"
 
+echo
+echo "Enviando 'Terceira mensagem' para o processo 3 (via localhost:${LOCAL_PORT_3})..."
+curl -X POST "http://localhost:${LOCAL_PORT_3}/recieve_external_message?message=Terceira%20mensagem"
+
+echo
+echo "Enviando 'Quarta mensagem' para o processo 1 (via localhost:${LOCAL_PORT_1})..."
+curl -X POST "http://localhost:${LOCAL_PORT_1}/recieve_external_message?message=Quarta%20mensagem"
+
 echo -e "\n\n--- Mensagens enviadas. Observe os logs dos pods com 'kubectl logs -f <nome-do-pod>' ---"
 
 # Limpeza: encerra os processos de port-forward

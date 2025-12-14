@@ -16,4 +16,5 @@ EXPOSE 8000
 
 # Comando para iniciar a aplicação.
 # A variável de ambiente PROCESS_ID será fornecida em tempo de execução pelo Docker Compose.
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]
+# ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["python", "app.py"]
