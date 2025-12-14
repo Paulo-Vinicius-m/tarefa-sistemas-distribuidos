@@ -11,6 +11,7 @@ app = fastapi.FastAPI()
 
 # --- Variáveis Globais ---
 message_queue = []
+queue_lock = threading.Lock() # Lock para garantir acesso thread-safe à fila
 internal_clock = 0 # Relógio lógico de Lamport
 process_id = int(os.getenv("PROCESS_ID", "0"))
 all_processes = [1, 2, 3] # IDs de todos os processos no sistema
@@ -70,9 +71,11 @@ def recieve_external_message(message: str):
     '''Recebe uma mensagem de um cliente externo e inicia o multicast'''
     global internal_clock
     internal_clock += 1
-    new_message = Message(data=message, process_id=process_id, timestamp=internal_clock)
-    message_queue.append(new_message)
-    broadcast_message(message_queue[-1])
+    with queue_lock:
+        new_message = Message(data=message, process_id=process_id, timestamp=internal_clock)
+        message_queue.append(new_message)
+        message_queue.sort(key=lambda m: (m.timestamp, m.process_id))
+    broadcast_message(new_message) # Broadcast fora do lock para não bloquear por I/O
     return 'ACK'
 
 
@@ -81,21 +84,23 @@ def recieve_message(message: Message):
     '''Recebe uma mensagem de outro processo'''
     global internal_clock
     internal_clock = max(internal_clock, message.timestamp) + 1
-    message_queue.append(message)
+    with queue_lock:
+        message_queue.append(message)
+        message_queue.sort(key=lambda m: (m.timestamp, m.process_id))
     # Envia ACK para todos os outros processos
     broadcast_ack(message)
     return 'ACK'
         
-
 @app.post('/recieve_ack')
 def recieve_ack(ack: Ack):
     '''Recebe um ACK de outro processo'''
     # Encontra a mensagem na fila que corresponde ao ACK
-    for msg in message_queue:
-        if msg.process_id == ack.message_process_id and msg.timestamp == ack.message_timestamp:
-            if ack.ack_source_process_id not in msg.acks_sources:
-                msg.acks_sources.append(ack.ack_source_process_id)
-            break
+    with queue_lock:
+        for msg in message_queue:
+            if msg.process_id == ack.message_process_id and msg.timestamp == ack.message_timestamp:
+                if ack.ack_source_process_id not in msg.acks_sources:
+                    msg.acks_sources.append(ack.ack_source_process_id)
+                break
     return 'ACK'
 
 # --- Lógica de Entrega de Mensagens ---
@@ -103,12 +108,13 @@ def recieve_ack(ack: Ack):
 def deliver_messages():
     '''Verifica a fila e entrega as mensagens que receberam todos os ACKs em ordem'''
     while True:
-        message_queue.sort(key=lambda m: (m.timestamp, m.process_id))
-        
-        if message_queue and message_queue[0].verify_acks():
-            delivered_message = message_queue.pop(0)
-            print(f"DELIVERED: '{delivered_message.data}' from process {delivered_message.process_id} with timestamp {delivered_message.timestamp}")
-        
+        delivered_message = None
+        with queue_lock:
+            # A verificação e o pop() agora são uma operação atômica
+            if message_queue and message_queue[0].verify_acks():
+                delivered_message = message_queue.pop(0)
+        if delivered_message:
+            print(f"DELIVERED: '{delivered_message.data}' from process {delivered_message.process_id} with timestamp {delivered_message.timestamp}")        
         time.sleep(1)
 
 if __name__ == "__main__":
