@@ -25,11 +25,11 @@ trap cleanup SIGINT EXIT
 echo "🚀 Iniciando Cluster (Causal)..."
 
 # Inicia os 3 processos
-python eventual_consistency.py 0 &
+python app.py 0 &
 PID0=$!
-python eventual_consistency.py 1 &
+python app.py 1 &
 PID1=$!
-python eventual_consistency.py 2 &
+python app.py 2 &
 PID2=$!
 
 echo "⏳ Aguardando startup (5s)..."
