@@ -35,10 +35,9 @@ check_status() {
     echo ""
 }
 
-echo -e "\n${YELLOW}Passo 1: Aguardando o cluster estabilizar... (20s)${NC}"
+echo -e "\n${YELLOW}Passo 1: Inicialização do cluster.${NC}"
 echo "O processo 3 (maior ID) deve se tornar o líder inicial."
 echo "Observe os logs dos pods com 'kubectl logs -f <nome-do-pod>'"
-sleep 20
 
 check_status
 
