@@ -7,116 +7,110 @@ import time
 
 app = fastapi.FastAPI()
 
-# --- Variáveis Globais ---
-# Identificador do processo, obtido da variável de ambiente PROCESS_ID. Padrão é 1.
 process_id = int(os.getenv("PROCESS_ID", "1"))
-# Lista de todos os processos no anel.
 all_processes = [1, 2, 3]
-# Identificador do próximo processo no anel lógico.
 next_process_id = (process_id % len(all_processes)) + 1
 
-# --- Estado do Algoritmo Token Ring ---
+# --- Estado Protegido ---
+# Lock para proteger TODAS as variáveis de estado
+state_lock = threading.Lock()
+
 has_token = False
 wants_to_enter_cs = False
 in_critical_section = False
 
-# --- Funções do Algoritmo ---
-
 def pass_token():
-    """
-    Passa o token para o próximo processo no anel.
-    Esta função é chamada quando o processo atual libera a seção crítica
-    ou quando recebe o token, mas não precisa dele.
-    """
     global has_token
-    if not has_token:
-        # Isso não deveria acontecer, mas é uma boa verificação de sanidade.
-        print(f"AVISO: Processo {process_id} tentou passar o token, mas não o possui.")
-        return
-
-    has_token = False
-    print(f"Processo {process_id} passando o token para o processo {next_process_id}.")
     
-    # Tenta enviar o token para o próximo processo
-    try:
-        url = f"http://app-{next_process_id}:8000/receive_token"
-        # O timeout é curto porque a rede interna (ex: Docker) deve ser rápida.
-        requests.post(url, timeout=1)
-    except requests.RequestException as e:
-        print(f"ERRO: Falha ao enviar token para o processo {next_process_id}: {e}")
-        # Em um sistema real, seria necessário um tratamento de falhas mais robusto,
-        # como reconstruir o anel. Para este exemplo, o token é "perdido" se o
-        # próximo processo estiver offline.
-        print(f"AVISO: Token não pode ser passado. O anel pode estar quebrado.")
-
+    # O Lock deve ser adquirido ANTES de ler ou escrever o estado
+    # No entanto, pass_token geralmente é chamado de dentro de funções 
+    # que já seguram o lock (recursividade). 
+    # Para simplificar, vamos assumir que quem chama pass_token já tem o lock
+    # ou vamos checar o estado cuidadosamente.
+    
+    # OBS: requests.post é I/O bloqueante e lento. 
+    # NÃO devemos segurar o lock durante a requisição de rede se possível,
+    # mas devemos segurar enquanto modificamos has_token.
+    
+    should_send = False
+    
+    with state_lock:
+        if has_token:
+            has_token = False
+            should_send = True
+    
+    if should_send:
+        print(f"Processo {process_id} passando o token...")
+        try:
+            url = f"http://app-{next_process_id}:8000/receive_token"
+            requests.post(url, timeout=10)
+        except Exception as e:
+            print(f"Erro ao passar token: {e}")
 
 def process_received_token():
-    """
-    Decide o que fazer com o token recém-recebido.
-    Se o processo quer entrar na seção crítica, ele o faz.
-    Caso contrário, passa o token adiante.
-    """
     global in_critical_section, wants_to_enter_cs
     
-    if wants_to_enter_cs:
-        # O processo quer usar o recurso, então entra na seção crítica
-        in_critical_section = True
-        wants_to_enter_cs = False
-        print(f"Processo {process_id} ENTROU na Seção Crítica (SC).")
-        # O processo manterá o token até que a SC seja liberada
-    else:
-        # O processo não precisa da SC, então passa o token imediatamente
-        print(f"Processo {process_id} não precisa da SC, passando o token adiante.")
-        # Adiciona um pequeno delay para facilitar a visualização do fluxo
-        time.sleep(1)
+    with state_lock:
+        if wants_to_enter_cs:
+            in_critical_section = True
+            wants_to_enter_cs = False
+            print(f"Processo {process_id} ENTROU na SC.")
+            should_pass = False
+        else:
+            print(f"Processo {process_id} passando token adiante.")
+            should_pass = True
+
+    # Realiza a ação fora do bloco do lock principal se envolver I/O pesado ou sleep
+    if should_pass:
+        time.sleep(1) 
         pass_token()
-
-
-# --- Endpoints da API ---
 
 @app.post("/request_cs")
 def request_cs():
-    """
-    Endpoint para um cliente externo solicitar acesso à Seção Crítica (SC).
-    """
     global wants_to_enter_cs
-    if in_critical_section:
-        return {"status": "Erro", "message": f"Processo {process_id} já está na Seção Crítica."}
-    if wants_to_enter_cs:
-        return {"status": "OK", "message": f"Processo {process_id} já está aguardando para entrar na SC."}
-    
-    print(f"Processo {process_id} recebeu uma requisição e agora DESEJA entrar na SC.")
-    wants_to_enter_cs = True
-    return {"status": "OK", "message": f"Requisição registrada. Processo {process_id} aguardará pelo token."}
+    with state_lock:
+        if in_critical_section:
+            return {"status": "Erro", "message": "Já na SC."}
+        if wants_to_enter_cs:
+            return {"status": "OK", "message": "Já aguardando."}
+        
+        print(f"Processo {process_id} deseja entrar na SC.")
+        wants_to_enter_cs = True
+    return {"status": "OK"}
 
 @app.post("/release_cs")
 def release_cs():
-    """
-    Endpoint para um cliente externo sinalizar que o processo pode sair da Seção Crítica.
-    """
     global in_critical_section
-    if not in_critical_section:
-        return {"status": "Erro", "message": f"Processo {process_id} não está na Seção Crítica."}
-
-    print(f"Processo {process_id} recebeu uma requisição para SAIR da SC.")
-    in_critical_section = False
-    pass_token()
-    return {"status": "OK", "message": "Seção Crítica liberada e token passado adiante."}
+    
+    should_pass = False
+    with state_lock:
+        if not in_critical_section:
+            return {"status": "Erro", "message": "Não está na SC."}
+        
+        print(f"Processo {process_id} saindo da SC.")
+        in_critical_section = False
+        should_pass = True
+    
+    if should_pass:
+        pass_token()
+        
+    return {"status": "OK"}
 
 @app.post("/receive_token")
 def receive_token():
-    """
-    Recebe o token do processo anterior no anel.
-    """
     global has_token
-    if has_token:
-        # Isso pode acontecer em cenários de falha de rede e retransmissão.
-        print(f"AVISO: Processo {process_id} recebeu o token, mas já o possuía. Ignorando.")
-        return {"status": "Ignorado"}
-
-    print(f"Processo {process_id} RECEBEU o token.")
-    has_token = True
-    process_received_token()
+    
+    process_it = False
+    with state_lock:
+        if has_token:
+            return {"status": "Ignorado"}
+        print(f"Processo {process_id} RECEBEU o token.")
+        has_token = True
+        process_it = True
+    
+    if process_it:
+        process_received_token()
+        
     return {"status": "ACK"}
 
 @app.get("/status")
